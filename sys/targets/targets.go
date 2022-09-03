@@ -392,32 +392,18 @@ var List = map[string]map[string]*Target{
 			CCompiler:    "c++",
 			// PIE is enabled on OpenBSD by default, so no need for -static-pie.
 			CFlags: []string{"-m64", "-static", "-lutil"},
-			NeedSyscallDefine: func(nr uint64) bool {
-				switch nr {
-				case 8: // SYS___tfork
-					return true
-				case 94: // SYS___thrsleep
-					return true
-				case 198: // SYS___syscall
-					return true
-				case 295: // SYS___semctl
-					return true
-				case 301: // SYS___thrwakeup
-					return true
-				case 302: // SYS___threxit
-					return true
-				case 303: // SYS___thrsigdivert
-					return true
-				case 304: // SYS___getcwd
-					return true
-				case 329: // SYS___set_tcb
-					return true
-				case 330: // SYS___get_tcb
-					return true
+			LookupTrampoline: func(name string) (string, bool) {
+				if strings.HasPrefix(name, "syz_") {
+					return "", false
 				}
-				return false
+				if before, _, found := strings.Cut(name, "$"); found {
+					name = before
+				}
+				if name == "semctl" {
+					return "__semctl", true
+				}
+				return name, true
 			},
-			LookupTrampoline: noTrampolines,
 		},
 	},
 	Fuchsia: {
@@ -532,8 +518,7 @@ var oses = map[string]osCommon{
 		KernelObject:           "netbsd.gdb",
 	},
 	OpenBSD: {
-		SyscallNumbers:         true,
-		SyscallPrefix:          "SYS_",
+		SyscallNumbers:         false,
 		ExecutorUsesShmem:      true,
 		ExecutorUsesForkServer: true,
 		KernelObject:           "bsd.gdb",

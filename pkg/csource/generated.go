@@ -11078,6 +11078,35 @@ static void use_temporary_dir(void)
 #error "unknown OS"
 #endif
 
+#if GOOS_openbsd
+#include <dirent.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <signal.h>
+#include <sys/event.h>
+#include <sys/ioctl.h>
+#include <sys/ktrace.h>
+#include <sys/mman.h>
+#include <sys/msg.h>
+#include <sys/resource.h>
+#include <sys/sem.h>
+#include <sys/shm.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/sysctl.h>
+#include <sys/syslog.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <sys/uio.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
+int sendsyslog(const char*, size_t, int);
+#ifdef __cplusplus
+}
+#endif
+#endif
+
 
 #if SYZ_EXECUTOR || __NR_syz_execute_func
 static long syz_execute_func(volatile long text)

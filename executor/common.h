@@ -495,10 +495,6 @@ static uint16 csum_inet_digest(struct csum_inet* csum)
 #include "common_akaros.h"
 #elif GOOS_freebsd || GOOS_darwin || GOOS_netbsd || GOOS_openbsd
 #include "common_bsd.h"
-#if GOOS_openbsd
-#include "openbsd_libc_syscall_stubs.h"
-#define CAST(f) (f)
-#endif
 #elif GOOS_fuchsia
 #include "common_fuchsia.h"
 #elif GOOS_linux
@@ -509,6 +505,36 @@ static uint16 csum_inet_digest(struct csum_inet* csum)
 #include "common_windows.h"
 #else
 #error "unknown OS"
+#endif
+
+#if GOOS_openbsd
+#include <dirent.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <signal.h>
+#include <sys/event.h>
+#include <sys/ioctl.h>
+#include <sys/ktrace.h>
+#include <sys/mman.h>
+#include <sys/msg.h>
+#include <sys/resource.h>
+#include <sys/sem.h>
+#include <sys/shm.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/sysctl.h>
+#include <sys/syslog.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <sys/uio.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
+// Private syscalls still need fuzzing even if not exported.
+int sendsyslog(const char*, size_t, int);
+#ifdef __cplusplus
+}
+#endif
 #endif
 
 #include "common_ext.h"
