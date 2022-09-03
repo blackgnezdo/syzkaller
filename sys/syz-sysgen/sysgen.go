@@ -309,7 +309,7 @@ func generateExecutorSyscalls(target *targets.Target, syscalls []*prog.Syscall, 
 }
 
 func newSyscallData(target *targets.Target, sc *prog.Syscall, attrs []uint64) SyscallData {
-	callName, patchCallName := target.SyscallTrampolines[sc.Name]
+	callName, patchCallName := target.LookupTrampoline(sc.Name)
 	if !patchCallName {
 		callName = sc.CallName
 	}

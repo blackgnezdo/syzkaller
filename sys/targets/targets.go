@@ -35,9 +35,11 @@ type Target struct {
 	KernelHeaderArch string
 	BrokenCompiler   string
 	// NeedSyscallDefine is used by csource package to decide when to emit __NR_* defines.
-	NeedSyscallDefine  func(nr uint64) bool
-	HostEndian         binary.ByteOrder
-	SyscallTrampolines map[string]string
+	NeedSyscallDefine func(nr uint64) bool
+	HostEndian        binary.ByteOrder
+	// Find a replacement function for the given syscall name. If true, the returned string
+	// is the name of the syscall wrapper function to access the syscall.
+	LookupTrampoline func(string) (string, bool)
 
 	init      *sync.Once
 	initOther *sync.Once
@@ -179,6 +181,7 @@ var List = map[string]map[string]*Target{
 				ExecutorUsesShmem:      false,
 				ExecutorUsesForkServer: false,
 			},
+			LookupTrampoline: noTrampolines,
 		},
 		TestArch64Fork: {
 			PtrSize:  8,
@@ -191,6 +194,7 @@ var List = map[string]map[string]*Target{
 				ExecutorUsesShmem:      false,
 				ExecutorUsesForkServer: true,
 			},
+			LookupTrampoline: noTrampolines,
 		},
 		TestArch32Shmem: {
 			PtrSize:        4,
@@ -204,6 +208,7 @@ var List = map[string]map[string]*Target{
 				ExecutorUsesShmem:      true,
 				ExecutorUsesForkServer: false,
 			},
+			LookupTrampoline: noTrampolines,
 		},
 		TestArch32ForkShmem: {
 			PtrSize:  4,
@@ -217,6 +222,7 @@ var List = map[string]map[string]*Target{
 				ExecutorUsesForkServer: true,
 				HostFuzzer:             true,
 			},
+			LookupTrampoline: noTrampolines,
 		},
 	},
 	Linux: {
@@ -233,6 +239,7 @@ var List = map[string]map[string]*Target{
 				// (added after commit 8a1ab3155c2ac on 2012-10-04).
 				return nr >= 313
 			},
+			LookupTrampoline: noTrampolines,
 		},
 		I386: {
 			VMArch:           AMD64,
@@ -244,6 +251,7 @@ var List = map[string]map[string]*Target{
 			Triple:           "x86_64-linux-gnu",
 			KernelArch:       "i386",
 			KernelHeaderArch: "x86",
+			LookupTrampoline: noTrampolines,
 		},
 		ARM64: {
 			PtrSize:          8,
@@ -252,6 +260,7 @@ var List = map[string]map[string]*Target{
 			Triple:           "aarch64-linux-gnu",
 			KernelArch:       "arm64",
 			KernelHeaderArch: "arm64",
+			LookupTrampoline: noTrampolines,
 		},
 		ARM: {
 			VMArch:           ARM64,
@@ -262,6 +271,7 @@ var List = map[string]map[string]*Target{
 			Triple:           "arm-linux-gnueabi",
 			KernelArch:       "arm",
 			KernelHeaderArch: "arm",
+			LookupTrampoline: noTrampolines,
 		},
 		MIPS64LE: {
 			PtrSize:          8,
@@ -271,6 +281,7 @@ var List = map[string]map[string]*Target{
 			Triple:           "mips64el-linux-gnuabi64",
 			KernelArch:       "mips",
 			KernelHeaderArch: "mips",
+			LookupTrampoline: noTrampolines,
 		},
 		PPC64LE: {
 			PtrSize:          8,
@@ -280,6 +291,7 @@ var List = map[string]map[string]*Target{
 			Triple:           "powerpc64le-linux-gnu",
 			KernelArch:       "powerpc",
 			KernelHeaderArch: "powerpc",
+			LookupTrampoline: noTrampolines,
 		},
 		S390x: {
 			PtrSize:          8,
@@ -289,12 +301,15 @@ var List = map[string]map[string]*Target{
 			Triple:           "s390x-linux-gnu",
 			KernelArch:       "s390",
 			KernelHeaderArch: "s390",
-			SyscallTrampolines: map[string]string{
+			LookupTrampoline: func(name string) (string, bool) {
 				// The s390x Linux syscall ABI allows for upto 5 input parameters passed in registers, and this is not enough
 				// for the mmap syscall. Therefore, all input parameters for the mmap syscall are packed into a struct
 				// on user stack and the pointer to the struct is passed as an input parameter to the syscall.
 				// To work around this problem we therefore reroute the mmap syscall to the glibc mmap wrapper.
-				"mmap": "mmap",
+				if name == "mmap" {
+					return "mmap", true
+				}
+				return "", false
 			},
 		},
 		RiscV64: {
@@ -304,6 +319,7 @@ var List = map[string]map[string]*Target{
 			Triple:           "riscv64-linux-gnu",
 			KernelArch:       "riscv",
 			KernelHeaderArch: "riscv",
+			LookupTrampoline: noTrampolines,
 		},
 	},
 	FreeBSD: {
@@ -317,6 +333,7 @@ var List = map[string]map[string]*Target{
 				// freebsd_12_shm_open, shm_open2, shm_rename, __realpathat, close_range, copy_file_range
 				return nr == 482 || nr >= 569
 			},
+			LookupTrampoline: noTrampolines,
 		},
 		I386: {
 			VMArch:   AMD64,
@@ -333,6 +350,7 @@ var List = map[string]map[string]*Target{
 				// freebsd_12_shm_open, shm_open2, shm_rename, __realpathat, close_range, copy_file_range
 				return nr == 482 || nr >= 569
 			},
+			LookupTrampoline: noTrampolines,
 		},
 	},
 	Darwin: {
@@ -349,6 +367,7 @@ var List = map[string]map[string]*Target{
 				"-Wno-deprecated-declarations",
 			},
 			NeedSyscallDefine: dontNeedSyscallDefine,
+			LookupTrampoline:  noTrampolines,
 		},
 	},
 	NetBSD: {
@@ -361,7 +380,8 @@ var List = map[string]map[string]*Target{
 				"-static-pie",
 				"--sysroot", sourceDirVar + "/dest/",
 			},
-			CCompiler: sourceDirVar + "/tools/bin/x86_64--netbsd-g++",
+			CCompiler:        sourceDirVar + "/tools/bin/x86_64--netbsd-g++",
+			LookupTrampoline: noTrampolines,
 		},
 	},
 	OpenBSD: {
@@ -397,6 +417,7 @@ var List = map[string]map[string]*Target{
 				}
 				return false
 			},
+			LookupTrampoline: noTrampolines,
 		},
 	},
 	Fuchsia: {
@@ -408,6 +429,7 @@ var List = map[string]map[string]*Target{
 			CCompiler:        sourceDirVar + "/prebuilt/third_party/clang/linux-x64/bin/clang",
 			Objdump:          sourceDirVar + "/prebuilt/third_party/clang/linux-x64/bin/llvm-objdump",
 			CFlags:           fuchsiaCFlags("x64", "x86_64"),
+			LookupTrampoline: noTrampolines,
 		},
 		ARM64: {
 			PtrSize:          8,
@@ -417,14 +439,16 @@ var List = map[string]map[string]*Target{
 			CCompiler:        sourceDirVar + "/prebuilt/third_party/clang/linux-x64/bin/clang",
 			Objdump:          sourceDirVar + "/prebuilt/third_party/clang/linux-x64/bin/llvm-objdump",
 			CFlags:           fuchsiaCFlags(ARM64, "aarch64"),
+			LookupTrampoline: noTrampolines,
 		},
 	},
 	Windows: {
 		AMD64: {
 			PtrSize: 8,
 			// TODO(dvyukov): what should we do about 4k vs 64k?
-			PageSize:     4 << 10,
-			LittleEndian: true,
+			PageSize:         4 << 10,
+			LittleEndian:     true,
+			LookupTrampoline: noTrampolines,
 		},
 	},
 	Akaros: {
@@ -438,6 +462,7 @@ var List = map[string]map[string]*Target{
 			CFlags: []string{
 				"-static",
 			},
+			LookupTrampoline: noTrampolines,
 		},
 	},
 	Trusty: {
@@ -446,6 +471,7 @@ var List = map[string]map[string]*Target{
 			PageSize:          4 << 10,
 			LittleEndian:      true,
 			NeedSyscallDefine: dontNeedSyscallDefine,
+			LookupTrampoline:  noTrampolines,
 		},
 	},
 }
@@ -875,6 +901,8 @@ func checkFlagSupported(target *Target, flag string) bool {
 
 func needSyscallDefine(nr uint64) bool     { return true }
 func dontNeedSyscallDefine(nr uint64) bool { return false }
+
+func noTrampolines(string) (string, bool) { return "", false }
 
 var (
 	runningOnCI = os.Getenv("CI") != ""
