@@ -16,25 +16,34 @@ import re
 import subprocess
 
 
-def find_stubs(libc_file):
+Stubs = dict[str, tuple[int, str]]
+
+def find_stubs(libc_file : str) -> Stubs:
     nm_proc = subprocess.Popen(["/usr/bin/nm", libc_file], stdout=subprocess.PIPE)
     (output, _) = nm_proc.communicate()
     assert 0 == nm_proc.wait()
 
-    exported_stub_re = re.compile('^([0-9a-f]+) T _thread_sys_(\w+)')
+    thread_stub_re = re.compile('^([0-9a-f]+) T _thread_sys_(\w+)')
+    libc_name_re = re.compile('^([0-9a-f]+) t _libc_(\w+)')
+    thread_stub_addrs = {}
     libc_stub_addrs = {}
     for line in output.decode("utf-8").splitlines():
-        m = exported_stub_re.match(line)
-        if m:
-            libc_stub_addrs[m.group(2)] = int(m.group(1), 16)
-    return libc_stub_addrs
+        if m := thread_stub_re.match(line):
+            thread_stub_addrs[int(m.group(1), 16)] = m.group(2)
+        if m := libc_name_re.match(line):
+            libc_stub_addrs[int(m.group(1), 16)] = m.group(2)
+
+    return {
+        thread_stub_name : (addr, libc_stub_addrs.get(addr))
+        for addr, thread_stub_name in thread_stub_addrs.items()
+    }
 
 
-def find_syscall_instrs(libc_file, libc_stub_addrs):
+def find_syscall_instrs(libc_file : str, stubs : Stubs) -> dict[str, str]:
     # Checks that all the found stubs have a syscall instruction.
     syscall_inst_re = re.compile('^\s*[0-9a-f]+:.+\s+syscall', flags=re.MULTILINE)
-    known_stubs = []
-    for name, addr in libc_stub_addrs.items():
+    known_stubs = {}
+    for name, (addr, libc_name) in stubs.items():
         objdump_cmd = [
             "/usr/bin/objdump",
             "--disassemble",
@@ -47,7 +56,7 @@ def find_syscall_instrs(libc_file, libc_stub_addrs):
         assert 0 == objdump_proc.wait()
         out_str = output.decode('utf-8')
         if syscall_inst_re.search(out_str):
-            known_stubs.append(name)
+            known_stubs[name] = libc_name
         else:
             print(f"The stub for '%s' has unexpected instructions:\n%s" % (name, out_str),
                   file=sys.stderr)
@@ -68,3 +77,4 @@ def main():
         print(f"extern void* _thread_sys_%s;" % stub)
 
 main()
+
