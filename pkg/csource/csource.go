@@ -346,14 +346,16 @@ func (ctx *context) fmtCallBody(call prog.ExecCall) string {
 		}
 		funcName = fmt.Sprintf("((intptr_t(*)(%v))CAST(%v))", args, callName)
 	}
-	for _, arg := range call.Args {
+	for i, arg := range call.Args {
 		switch arg := arg.(type) {
 		case prog.ExecArgConst:
 			if arg.Format != prog.FormatNative && arg.Format != prog.FormatBigEndian {
 				panic("string format in syscall argument")
 			}
 			suf := ctx.literalSuffix(arg, native)
-			argsStrs = append(argsStrs, handleBigEndian(arg, ctx.constArgToStr(arg, suf)))
+			argsStrs = append(argsStrs,
+				fmt.Sprintf("/* %q */ %v", call.Meta.Args[i].Type,
+					handleBigEndian(arg, ctx.constArgToStr(arg, suf))))
 		case prog.ExecArgResult:
 			if arg.Format != prog.FormatNative && arg.Format != prog.FormatBigEndian {
 				panic("string format in syscall argument")
