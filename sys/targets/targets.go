@@ -35,19 +35,30 @@ type Target struct {
 	KernelHeaderArch string
 	BrokenCompiler   string
 	// NeedSyscallDefine is used by csource package to decide when to emit __NR_* defines.
-	NeedSyscallDefine  func(nr uint64) bool
-	HostEndian         binary.ByteOrder
-	SyscallTrampolines map[string]string
+	NeedSyscallDefine func(nr uint64) bool
+	HostEndian        binary.ByteOrder
+	// Returns a non-empty value to replace the given call with when substitution is needed.
+	SyscallTrampolines func(string) string
 
 	init      *sync.Once
 	initOther *sync.Once
 	// Target for the other compiler. If SYZ_CLANG says to use gcc, this will be clang. Or the other way around.
-	other    *Target
+	other *Target
+
 	timeouts Timeouts
 }
 
 func (target *Target) HasCallNumber(callName string) bool {
 	return target.SyscallNumbers && !strings.HasPrefix(callName, "syz_")
+}
+
+func (target *Target) HasDirectEmit(callName string) bool {
+	return target.invokeLibcStubs || strings.HasPrefix(callName, "syz_")
+}
+
+func (target *Target) IsNative(callName string) bool {
+	trampoline := target.SyscallTrampolines(callName)
+	return target.HasCallNumber(callName) && trampoline == ""
 }
 
 type osCommon struct {
@@ -85,6 +96,8 @@ type osCommon struct {
 	PseudoSyscallDeps map[string][]string
 	// Common CFLAGS for this OS.
 	cflags []string
+	// invoke syscalls as C functions.
+	invokeLibcStubs bool
 }
 
 // Timeouts structure parametrizes timeouts throughout the system.
@@ -294,12 +307,15 @@ var List = map[string]map[string]*Target{
 			Triple:           "s390x-linux-gnu",
 			KernelArch:       "s390",
 			KernelHeaderArch: "s390",
-			SyscallTrampolines: map[string]string{
+			SyscallTrampolines: func(name string) string {
 				// The s390x Linux syscall ABI allows for upto 5 input parameters passed in registers, and this is not enough
 				// for the mmap syscall. Therefore, all input parameters for the mmap syscall are packed into a struct
 				// on user stack and the pointer to the struct is passed as an input parameter to the syscall.
 				// To work around this problem we therefore reroute the mmap syscall to the glibc mmap wrapper.
-				"mmap": "mmap",
+				if name == "mmap" {
+					return "mmap"
+				}
+				return ""
 			},
 		},
 		RiscV64: {
@@ -424,6 +440,12 @@ var List = map[string]map[string]*Target{
 				}
 				return false
 			},
+			SyscallTrampolines: func(name string) string {
+				if !strings.HasPrefix(name, "syz_") {
+					return "obsd_wrap_" + strings.Split(name, "$")[0]
+				}
+				return ""
+			},
 		},
 	},
 	Fuchsia: {
@@ -540,10 +562,10 @@ var oses = map[string]osCommon{
 		KernelObject:           "netbsd.gdb",
 	},
 	OpenBSD: {
-		SyscallNumbers:         true,
-		SyscallPrefix:          "SYS_",
+		SyscallNumbers:         false,
 		ExecutorUsesShmem:      true,
 		ExecutorUsesForkServer: true,
+		invokeLibcStubs:        true,
 		KernelObject:           "bsd.gdb",
 		CPP:                    "ecpp",
 	},
@@ -686,6 +708,11 @@ func initTarget(target *Target, OS, arch string) {
 	}
 	if target.NeedSyscallDefine == nil {
 		target.NeedSyscallDefine = needSyscallDefine
+	}
+	if target.SyscallTrampolines == nil {
+		target.SyscallTrampolines = func(string) string {
+			return "" // Do not remap anything
+		}
 	}
 	if target.DataOffset == 0 {
 		target.DataOffset = 512 << 20

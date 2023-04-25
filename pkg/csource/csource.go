@@ -287,13 +287,8 @@ func (ctx *context) generateCalls(p prog.ExecProg, trace bool) ([]string, []uint
 	return calls, p.Vars
 }
 
-func isNative(sysTarget *targets.Target, callName string) bool {
-	_, trampoline := sysTarget.SyscallTrampolines[callName]
-	return sysTarget.HasCallNumber(callName) && !trampoline
-}
-
 func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCopyout, trace bool) {
-	native := isNative(ctx.sysTarget, call.Meta.CallName)
+	native := ctx.sysTarget.IsNative(call.Meta.CallName)
 	fmt.Fprintf(w, "\t")
 	if !native {
 		// This mimics the same as executor does for execute_syscall,
@@ -332,19 +327,19 @@ func (ctx *context) emitCall(w *bytes.Buffer, call prog.ExecCall, ci int, haveCo
 }
 
 func (ctx *context) fmtCallBody(call prog.ExecCall) string {
-	native := isNative(ctx.sysTarget, call.Meta.CallName)
-	callName, ok := ctx.sysTarget.SyscallTrampolines[call.Meta.CallName]
-	if !ok {
-		callName = call.Meta.CallName
-	}
+	native := ctx.sysTarget.IsNative(call.Meta.CallName)
 	argsStrs := []string{}
 	funcName := ""
 	if native {
 		funcName = "syscall"
-		argsStrs = append(argsStrs, ctx.sysTarget.SyscallPrefix+callName)
-	} else if strings.HasPrefix(callName, "syz_") {
-		funcName = callName
+		argsStrs = append(argsStrs, ctx.sysTarget.SyscallPrefix+call.Meta.CallName)
+	} else if ctx.sysTarget.HasDirectEmit(call.Meta.CallName) {
+		funcName = call.Meta.CallName
 	} else {
+		callName := ctx.sysTarget.SyscallTrampolines(call.Meta.CallName)
+		if callName == "" {
+			callName = call.Meta.CallName
+		}
 		args := strings.Repeat(",intptr_t", len(call.Args)+call.Meta.MissingArgs)
 		if args != "" {
 			args = args[1:]
