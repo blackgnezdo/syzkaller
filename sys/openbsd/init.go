@@ -4,6 +4,7 @@
 package openbsd
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 
@@ -14,6 +15,7 @@ import (
 func InitTarget(target *prog.Target) {
 	arch := &arch{
 		unix:             targets.MakeUnixNeutralizer(target),
+		BIOCSETIF:        target.GetConst("BIOCSETIF"),
 		CLOCK_REALTIME:   target.GetConst("CLOCK_REALTIME"),
 		CTL_KERN:         target.GetConst("CTL_KERN"),
 		DIOCCLRSTATES:    target.GetConst("DIOCCLRSTATES"),
@@ -37,6 +39,7 @@ func InitTarget(target *prog.Target) {
 
 type arch struct {
 	unix             *targets.UnixNeutralizer
+	BIOCSETIF        uint64
 	CLOCK_REALTIME   uint64
 	CTL_KERN         uint64
 	DIOCCLRSTATES    uint64
@@ -113,6 +116,32 @@ func (arch *arch) neutralize(c *prog.Call, fixStructure bool) error {
 		if request.Val == arch.DIOCCLRSTATES || request.Val == arch.DIOCKILLSTATES {
 			request.Val = 0
 		}
+		// BIOCSETIF on tap leads to "tun: read failed"
+		if request.Val == arch.BIOCSETIF {
+			// Checks if the generator is calling this ioctl:
+			// ioctl$BIOCSETIF(-1, 0x8020426c, &(0x...)={'tap', 0x0})
+			// it causes SYZFAIL: tun: read failed
+			ptrArg, ok := c.Args[2].(*prog.PointerArg)
+			if !ok {
+				return nil
+			}
+			groupArg, ok := ptrArg.Res.(*prog.GroupArg)
+			if !ok {
+				return nil
+			}
+			dataArg, ok := groupArg.Inner[0].(*prog.DataArg)
+			if !ok {
+				return nil
+			}
+			if dataArg.Dir() == prog.DirOut {
+				return nil
+			}
+			if !bytes.Equal(dataArg.Data()[0:3], []byte("tap")) {
+				return nil
+			}
+			request.Val = 0
+		}
+
 	case "mknodat":
 		argStart = 2
 		fallthrough
