@@ -506,4 +506,3 @@ in `sys/arch/amd64/include/vmmvar.h`.
 
 `bin/syz-fmt` is not built by `make descriptions`; use
 `make format_sys`.
-
